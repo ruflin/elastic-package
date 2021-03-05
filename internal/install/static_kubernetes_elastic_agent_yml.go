@@ -32,8 +32,22 @@ spec:
               value: "1"
             - name: FLEET_ENROLL_INSECURE
               value: "1"
-            - name: KIBANA_HOST
+            - name: KIBANA_FLEET_HOST
               value: "http://kibana:5601"
+            - name: KIBANA_FLEET_SETUP
+              value: "1"
+            - name: KIBANA_FLEET_USERNAME
+              value: "elastic"
+            - name: KIBANA_FLEET_PASSWORD
+              value: "changeme"
+            - name: FLEET_SERVER_ENABLE
+              value: "1"
+            - name: FLEET_SERVER_ELASTICSEARCH_HOST
+              value: "http://elasticsearch:5601"
+            - name: FLEET_SERVER_ELASTICSEARCH_USERNAME
+              value: "elastic"
+            - name: FLEET_SERVER_ELASTICSEARCH_PASSWORD
+              value: "changeme"
             - name: NODE_NAME
               valueFrom:
                 fieldRef:
