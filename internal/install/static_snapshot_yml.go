@@ -81,10 +81,10 @@ services:
         condition: service_healthy
       kibana:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:8080"]
-      retries: 300
-      interval: 1s
+    #healthcheck:
+    #  test: ["CMD", "curl", "-f", "http://127.0.0.1:8080"]
+    #  retries: 300
+    #  interval: 1s
     #  test: "sh -c 'grep \"Agent is starting\" /usr/share/elastic-agent/elastic-agent.log*'"ff
     #  retries: 30
     #  interval: 1s
@@ -99,32 +99,18 @@ services:
     - "KIBANA_USERNAME=elastic"
     - "KIBANA_PASSWORD=changeme"
 
-# Setup of Fleet Integrations in Kibana
     - "KIBANA_FLEET_SETUP=1"
-
-# Fleet Server enabling
     - "FLEET_SERVER_ENABLE=1"
-    - "FLEET_URL=http://localhost:8210"
-#- "FLEET_SERVER_INSECURE_HTTP=1"
-
-# Enroll the Agent into itself
-    #- "FLEET_ENROLL=1"
-    #- "FLEET_ENROLL_INSECURE=1"marcin
-    #- "FLEET_SETUP=1"
-    #- "FLEET_URL=http://kibana:5601"
-    #- "KIBANA_HOST=http://kibana:5601"
-    #- "ELASTICSEARCH_HOST=http://elasticsearch:9200"
-    #- "FLEET_SERVER_ELASTICSEARCH_USERNAME=elastic"
-    #- "FLEET_SERVER_ELASTICSEARCH_PASSWORD=changeme"
+    - "FLEET_SERVER_INSECURE_HTTP=1"
 
     volumes:
     - type: bind
       source: ../tmp/service_logs/
       target: /tmp/service_logs/
 
-  elastic-agent_is_ready:
-    image: tianon/true
-    depends_on:
-      elastic-agent:
-        condition: service_healthy
+  #elastic-agent_is_ready:
+  #  image: tianon/true
+  #  depends_on:
+  #    elastic-agent:
+  #      condition: service_healthy
 `
