@@ -48,7 +48,7 @@ This warning helps you remember that custom configuration is active, which can b
 1. Base elastic-package configuration (from template)
 2. Your custom configuration (appended)
 
-Since YAML allows duplicate keys and Kibana processes them in order, your custom settings will override base settings with the same key.
+**Note on Overrides**: Custom configuration is appended to the base configuration file, not merged at the YAML structure level. When the same configuration key appears multiple times, Kibana's YAML parser will use the last occurrence, effectively allowing your custom settings to override base settings. This behavior is specific to how Kibana processes YAML configuration files.
 
 ## Examples
 
@@ -128,8 +128,10 @@ Custom configuration is automatically detected and applied for each profile when
 ## Limitations
 
 - Custom configuration is appended to the base configuration (not merged at the YAML structure level)
+- The override behavior relies on Kibana's YAML parser processing duplicate keys by using the last value
 - Some Kibana settings may require specific ordering or dependencies
 - Custom configuration may affect Kibana behavior and troubleshooting
+- Complex nested YAML structures may not override as expected; test your configuration to ensure it works as intended
 
 ## Related Documentation
 

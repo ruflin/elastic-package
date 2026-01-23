@@ -48,11 +48,8 @@ func createTestProfile(t *testing.T, profileName string) *profile.Profile {
 	profilesPath := filepath.Join(tempDir, "profiles")
 
 	// Set environment variable to use our temporary directory
-	originalEnv := os.Getenv("ELASTIC_PACKAGE_DATA_HOME")
-	os.Setenv("ELASTIC_PACKAGE_DATA_HOME", tempDir)
-	t.Cleanup(func() {
-		os.Setenv("ELASTIC_PACKAGE_DATA_HOME", originalEnv)
-	})
+	// Using t.Setenv for automatic cleanup and parallel test safety
+	t.Setenv("ELASTIC_PACKAGE_DATA_HOME", tempDir)
 
 	err := profile.CreateProfile(profile.Options{
 		ProfilesDirPath: profilesPath,
@@ -78,6 +75,7 @@ func TestKibanaConfigWithCustomContent_NoCustomConfig(t *testing.T) {
 	p := createTestProfile(t, "test-profile")
 
 	// Capture log output to test warning message
+	// Note: This works because internal/logger uses the standard log package
 	var logBuffer bytes.Buffer
 	log.SetOutput(&logBuffer)
 	defer log.SetOutput(os.Stderr)
@@ -203,6 +201,43 @@ func TestKibanaConfigWithCustomContent_NoTemplateProcessing(t *testing.T) {
 	generatedContent := output.String()
 	assert.Contains(t, generatedContent, "server.name: kibana-{{ fact \"kibana_version\" }}")
 	assert.Contains(t, generatedContent, "logging.level: {{ if eq .debug \"true\" }}debug{{ else }}info{{ end }}")
+}
+
+func TestKibanaConfigWithCustomContent_EmptyCustomConfig(t *testing.T) {
+	// Create a test profile
+	p := createTestProfile(t, "test-profile")
+
+	// Create an empty custom config file
+	customConfigPath := p.Path(KibanaDevConfigFile)
+	err := os.WriteFile(customConfigPath, []byte(""), 0644)
+	require.NoError(t, err)
+	defer os.Remove(customConfigPath)
+
+	// Capture log output to test warning message
+	var logBuffer bytes.Buffer
+	log.SetOutput(&logBuffer)
+	defer log.SetOutput(os.Stderr)
+
+	// Create the config generator function
+	configGenerator := kibanaConfigWithCustomContent(p)
+
+	// Create a resource context with default test values
+	ctx := createTestResourceContext()
+
+	// Generate the config
+	var output bytes.Buffer
+	err = configGenerator(ctx, &output)
+	require.NoError(t, err)
+
+	// Check the generated content contains base config
+	generatedContent := output.String()
+	assert.Contains(t, generatedContent, "server.name: kibana")
+	// Empty custom config should still add the separator comment
+	assert.Contains(t, generatedContent, "# Custom Kibana Configuration")
+
+	// Check warning message is still shown for empty file
+	logOutput := logBuffer.String()
+	assert.Contains(t, logOutput, "Custom Kibana configuration detected")
 }
 
 func TestKibanaConfigWithCustomContent_ErrorCases(t *testing.T) {
