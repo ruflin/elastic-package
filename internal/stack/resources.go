@@ -9,6 +9,7 @@ import (
 	"embed"
 	"fmt"
 	"html/template"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -18,8 +19,8 @@ import (
 
 	"github.com/elastic/go-resource"
 
+	"github.com/elastic/elastic-package/internal/install"
 	"github.com/elastic/elastic-package/internal/profile"
-	"github.com/elastic/elastic-package/internal/registry"
 )
 
 //go:embed _static
@@ -29,11 +30,17 @@ const (
 	// ComposeFile is the docker compose file.
 	ComposeFile = "docker-compose.yml"
 
+	// DockerfilePackageRegistryFile is the dockerfile for package-registry container.
+	DockerfilePackageRegistryFile = "Dockerfile.package-registry"
+
 	// ElasticsearchConfigFile is the elasticsearch config file.
 	ElasticsearchConfigFile = "elasticsearch.yml"
 
 	// KibanaConfigFile is the kibana config file.
 	KibanaConfigFile = "kibana.yml"
+
+	// KibanaDevConfigFile is the custom kibana config file.
+	KibanaDevConfigFile = "kibana.dev.yml"
 
 	// LogstashConfigFile is the logstash config file.
 	LogstashConfigFile = "logstash.conf"
@@ -59,14 +66,17 @@ const (
 	elasticsearchUsername = "elastic"
 	elasticsearchPassword = "changeme"
 
-	configAPMEnabled          = "stack.apm_enabled"
-	configGeoIPDir            = "stack.geoip_dir"
-	configKibanaHTTP2Enabled  = "stack.kibana_http2_enabled"
-	configLogsDBEnabled       = "stack.logsdb_enabled"
-	configLogstashEnabled     = "stack.logstash_enabled"
-	configSelfMonitorEnabled  = "stack.self_monitor_enabled"
-	configElasticEPRProxyTo   = "stack.epr.proxy_to"
-	configElasticSubscription = "stack.elastic_subscription"
+	configAPMEnabled                             = "stack.apm_enabled"
+	configGeoIPDir                               = "stack.geoip_dir"
+	configKibanaHTTP2Enabled                     = "stack.kibana_http2_enabled"
+	configLogsDBEnabled                          = "stack.logsdb_enabled"
+	configLogstashEnabled                        = "stack.logstash_enabled"
+	configSelfMonitorEnabled                     = "stack.self_monitor_enabled"
+	configElasticEPRProxyTo                      = "stack.epr.proxy_to"
+	configElasticEPRURL                          = "stack.epr.base_url"
+	configElasticSubscription                    = "stack.elastic_subscription"
+	configFleetAutoInstallTaskInterval           = "stack.fleet_auto_install_task_interval"
+	configFleetAutoInstallContentPackagesEnabled = "stack.fleet_auto_install_content_packages_enabled"
 )
 
 var (
@@ -77,7 +87,7 @@ var (
 	staticSource   = resource.NewSourceFS(static).WithTemplateFuncs(templateFuncs)
 	stackResources = []resource.Resource{
 		&resource.File{
-			Path:    "Dockerfile.package-registry",
+			Path:    DockerfilePackageRegistryFile,
 			Content: staticSource.Template("_static/Dockerfile.package-registry.tmpl"),
 		},
 		&resource.File{
@@ -108,8 +118,11 @@ var (
 			Content:      staticSource.File("_static/GeoLite2-Country.mmdb"),
 		},
 		&resource.File{
-			Path:    KibanaConfigFile,
-			Content: staticSource.Template("_static/kibana.yml.tmpl"),
+			Path: KibanaConfigFile,
+			Content: fileContentAppender(
+				staticSource.Template("_static/kibana.yml.tmpl"),
+				kibanaCustomContent(),
+			),
 		},
 		&resource.File{
 			Path:    KibanaHealthcheckFile,
@@ -146,7 +159,19 @@ var (
 	}
 )
 
-func applyResources(profile *profile.Profile, stackVersion string, agentVersion string) error {
+// fileContentAppender returns a FileContent that sequentially writes all given sources.
+func fileContentAppender(sources ...resource.FileContent) resource.FileContent {
+	return func(ctx resource.Context, w io.Writer) error {
+		for _, src := range sources {
+			if err := src(ctx, w); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+}
+
+func applyResources(profile *profile.Profile, appConfig *install.ApplicationConfiguration, stackVersion, agentVersion string) error {
 	stackDir := filepath.Join(profile.ProfilePath, ProfileStackPath)
 
 	var agentPorts []string
@@ -175,15 +200,17 @@ func applyResources(profile *profile.Profile, stackVersion string, agentVersion 
 		"password":         elasticsearchPassword,
 		"enrollment_token": "",
 
-		"agent_publish_ports":  strings.Join(agentPorts, ","),
-		"apm_enabled":          profile.Config(configAPMEnabled, "false"),
-		"geoip_dir":            profile.Config(configGeoIPDir, "./ingest-geoip"),
-		"kibana_http2_enabled": profile.Config(configKibanaHTTP2Enabled, "true"),
-		"logsdb_enabled":       profile.Config(configLogsDBEnabled, "false"),
-		"logstash_enabled":     profile.Config(configLogstashEnabled, "false"),
-		"self_monitor_enabled": profile.Config(configSelfMonitorEnabled, "false"),
-		"epr_proxy_to":         profile.Config(configElasticEPRProxyTo, registry.ProductionURL),
-		"elastic_subscription": elasticSubscriptionProfile,
+		"agent_publish_ports":                         strings.Join(agentPorts, ","),
+		"apm_enabled":                                 profile.Config(configAPMEnabled, "false"),
+		"geoip_dir":                                   profile.Config(configGeoIPDir, "./ingest-geoip"),
+		"kibana_http2_enabled":                        profile.Config(configKibanaHTTP2Enabled, "true"),
+		"logsdb_enabled":                              profile.Config(configLogsDBEnabled, "false"),
+		"logstash_enabled":                            profile.Config(configLogstashEnabled, "false"),
+		"self_monitor_enabled":                        profile.Config(configSelfMonitorEnabled, "false"),
+		"epr_proxy_to":                                packageRegistryProxyToURL(profile, appConfig),
+		"elastic_subscription":                        elasticSubscriptionProfile,
+		"fleet_auto_install_task_interval":            profile.Config(configFleetAutoInstallTaskInterval, "10m"),
+		"fleet_auto_install_content_packages_enabled": profile.Config(configFleetAutoInstallContentPackagesEnabled, "false"),
 	})
 
 	if err := os.MkdirAll(stackDir, 0755); err != nil {
@@ -192,6 +219,7 @@ func applyResources(profile *profile.Profile, stackVersion string, agentVersion 
 	resourceManager.RegisterProvider("file", &resource.FileProvider{
 		Prefix: stackDir,
 	})
+	resourceManager.RegisterProvider("profile", profile)
 	resources := append([]resource.Resource{}, stackResources...)
 
 	// Keeping certificates in the profile directory for backwards compatibility reasons.
